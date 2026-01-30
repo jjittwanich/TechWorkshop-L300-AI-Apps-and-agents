@@ -1,0 +1,73 @@
+name: Customer Loyalty Agent - Validate
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - src/app/agents/customerLoyaltyAgent_initializer.py
+      - src/prompts/CustomerLoyaltyAgentPrompt.txt
+      - src/app/tools/discountLogic.py
+  pull_request:
+    branches:
+      - main
+    paths:
+      - src/app/agents/customerLoyaltyAgent_initializer.py
+      - src/prompts/CustomerLoyaltyAgentPrompt.txt
+      - src/app/tools/discountLogic.py
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  run-initializer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: src/requirements.txt
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # requirements.txt contains a per-line "--pre" token for agent-framework; install around it.
+          grep -v '^agent-framework\b' src/requirements.txt > /tmp/requirements.no-agent-framework.txt
+          python -m pip install --pre -r /tmp/requirements.no-agent-framework.txt
+          python -m pip install --pre agent-framework
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
+
+      - name: Run customer loyalty agent initializer
+        working-directory: src
+        env:
+          # Required by customerLoyaltyAgent_initializer.py
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          gpt_deployment: ${{ secrets.GPT_DEPLOYMENT }}
+
+          # Required at import-time by app/agents/agent_processor.py
+          APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ secrets.APPLICATIONINSIGHTS_CONNECTION_STRING }}
+
+          # If you run an MCP server elsewhere, set this; otherwise defaults to localhost.
+          MCP_SERVER_URL: ${{ secrets.MCP_SERVER_URL }}
+
+          # Optional: used by discountLogic if the tool is invoked.
+          gpt_endpoint: ${{ secrets.GPT_ENDPOINT }}
+          gpt_api_version: ${{ secrets.GPT_API_VERSION }}
+          gpt_api_key: ${{ secrets.GPT_API_KEY }}
+        run: python app/agents/customerLoyaltyAgent_initializer.py
